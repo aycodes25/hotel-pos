@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// SQLite for local dev/demo — zero setup, single file at prisma/dev.db.
+// To move to production, switch provider to "postgresql" and set
+// DATABASE_URL accordingly; no other schema changes are required since
+// every "enum" here is a plain String validated in src/lib/enums.ts, and
+// list fields (amenities/images) are stored as JSON-encoded strings.
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Identity ----------
+// role: CUSTOMER | STAFF | ADMIN — see src/lib/enums.ts
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  role         String   @default("CUSTOMER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  bookings     Booking[]
+  reservations Reservation[]
+  orders       Order[]
+}
+
+// ---------- Hotel ----------
+// Room.status: AVAILABLE | MAINTENANCE | OUT_OF_SERVICE
+
+model RoomType {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String
+  basePrice   Float
+  capacity    Int
+  bedType     String
+  sizeSqft    Int
+  amenities   String   @default("[]") // JSON string[]
+  images      String   @default("[]") // JSON string[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rooms Room[]
+}
+
+model Room {
+  id         String   @id @default(cuid())
+  roomNumber String   @unique
+  floor      Int
+  status     String   @default("AVAILABLE")
+
+  roomTypeId String
+  roomType   RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+
+  bookings Booking[]
+}
+
+// Booking.status: PENDING | CONFIRMED | CHECKED_IN | CHECKED_OUT | CANCELLED
+
+model Booking {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  checkIn         DateTime
+  checkOut        DateTime
+  guests          Int
+  status          String   @default("PENDING")
+  totalPrice      Float
+  specialRequests String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  payment Payment?
+
+  @@index([roomId, checkIn, checkOut])
+}
+
+// ---------- Restaurant: tables & reservations ----------
+// RestaurantTable.location: INDOOR | OUTDOOR | PRIVATE
+// RestaurantTable.status: AVAILABLE | MAINTENANCE
+
+model RestaurantTable {
+  id          String @id @default(cuid())
+  tableNumber String @unique
+  capacity    Int
+  location    String @default("INDOOR")
+  status      String @default("AVAILABLE")
+
+  reservations Reservation[]
+  orders       Order[]
+}
+
+// Reservation.status: PENDING | CONFIRMED | SEATED | COMPLETED | CANCELLED | NO_SHOW
+
+model Reservation {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  date            DateTime
+  time            String
+  partySize       Int
+  status          String   @default("PENDING")
+  specialRequests String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tableId String
+  table   RestaurantTable @relation(fields: [tableId], references: [id], onDelete: Restrict)
+
+  @@index([tableId, date])
+}
+
+// ---------- Restaurant: menu & orders ----------
+
+model MenuCategory {
+  id        String @id @default(cuid())
+  name      String
+  slug      String @unique
+  sortOrder Int    @default(0)
+
+  items MenuItem[]
+}
+
+model MenuItem {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String
+  price       Float
+  image       String?
+  isVeg       Boolean @default(false)
+  isAvailable Boolean @default(true)
+  spiceLevel  Int     @default(0)
+
+  categoryId String
+  category   MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  orderItems OrderItem[]
+}
+
+// Order.type: DINE_IN | TAKEAWAY | DELIVERY
+// Order.status: PENDING | CONFIRMED | PREPARING | READY | OUT_FOR_DELIVERY | DELIVERED | COMPLETED | CANCELLED
+
+model Order {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  type            String
+  status          String   @default("PENDING")
+  deliveryAddress String?
+  notes           String?
+  subtotal        Float
+  tax             Float
+  total           Float
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tableId String?
+  table   RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+
+  items   OrderItem[]
+  payment Payment?
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  quantity  Int
+  unitPrice Float
+  notes     String?
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+}
+
+// ---------- Payments ----------
+// Payment.method: CARD | CASH | PAY_AT_PROPERTY | PAY_ON_DELIVERY
+// Payment.status: PENDING | PAID | FAILED | REFUNDED
+
+model Payment {
+  id        String   @id @default(cuid())
+  amount    Float
+  method    String
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  orderId String? @unique
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
